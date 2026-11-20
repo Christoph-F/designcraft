@@ -217,6 +217,9 @@ pub struct UiState {
     /// document it belongs to (a selection never carries over to another document or session).
     #[serde(skip)]
     pub pages_selected_parent: Option<(u64, designcraft_doc::SpreadId)>,
+    /// The pages selected in the Pages panel (Ctrl/Cmd-click, Shift-click, marquee).
+    #[serde(skip)]
+    pub pages_selection: panels::pages::PageSelection,
     /// The Pages panel's Panel Options.
     pub pages_panel: panels::pages::PanelOptions,
     /// Edit › Color Settings (re-applied at start).
@@ -422,6 +425,7 @@ impl Default for UiState {
             skip_delete_pages_warning: false,
             pages_parents_height: None,
             pages_selected_parent: None,
+            pages_selection: Default::default(),
             pages_panel: Default::default(),
             color_settings: None,
             color_profiles: Vec::new(),

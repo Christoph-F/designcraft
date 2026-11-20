@@ -581,3 +581,187 @@ fn a_page_dropped_on_create_new_page_is_duplicated_at_the_end() {
     assert_eq!(d.spreads[si].pages[pi].width, 612.0, "a copy of the letterhead");
     let _ = h.get_by_label("Edit page size");
 }
+
+// ---- Multi-page selection (#2738).
+
+/// A document of `n` single-page spreads in a panel harness whose canvas can be moved.
+fn pages_harness(n: usize) -> Harness<'static, DesignApp> {
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"pages": n, "facingPages": false})).unwrap();
+    app.canvas_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 800.0)));
+    sized_harness(app, vec2(280.0, 900.0))
+}
+
+/// Click page `page` (1-based label) with `modifiers` held.
+fn click_page(h: &mut Harness<'_, DesignApp>, page: usize, modifiers: Modifiers) {
+    let pos = h.get_by_label(&format!("Page {page}")).rect().center();
+    h.event(Event::ModifiersChanged(modifiers));
+    h.event(Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers });
+        h.run_steps(2);
+    }
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(2);
+}
+
+const CTRL: Modifiers = Modifiers { command: true, ctrl: true, alt: false, shift: false, mac_cmd: false };
+const SHIFT: Modifiers = Modifiers { command: false, ctrl: false, alt: false, shift: true, mac_cmd: false };
+const CTRL_SHIFT: Modifiers = Modifiers { command: true, ctrl: true, alt: false, shift: true, mac_cmd: false };
+
+/// Drag from `from` to `to` over a few frames with `modifiers` held.
+fn drag_between(h: &mut Harness<'_, DesignApp>, from: egui::Pos2, to: egui::Pos2, modifiers: Modifiers) {
+    h.event(Event::ModifiersChanged(modifiers));
+    h.event(Event::PointerMoved(from));
+    h.event(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers });
+    h.run_steps(2);
+    for k in 1..=4 {
+        h.event(Event::PointerMoved(from + (to - from) * (k as f32 / 4.0)));
+        h.run_steps(2);
+    }
+    h.event(Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers });
+    h.run_steps(3);
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(1);
+}
+
+#[test]
+fn page_range_runs_either_way_and_prune_drops_missing_pages() {
+    assert_eq!(page_range(2, 4).into_iter().collect::<Vec<_>>(), [2, 3, 4]);
+    assert_eq!(page_range(4, 2).into_iter().collect::<Vec<_>>(), [2, 3, 4]);
+    assert_eq!(page_range(3, 3).into_iter().collect::<Vec<_>>(), [3]);
+    let mut pages: std::collections::BTreeSet<usize> = [0, 2, 5, 9].into();
+    prune_pages(&mut pages, 5);
+    assert_eq!(pages.into_iter().collect::<Vec<_>>(), [0, 2]);
+}
+
+#[test]
+fn a_selection_follows_its_document_page_and_page_count() {
+    let mut s = PageSelection::default();
+    assert!(!s.click(1, 0, 6, 2, true, false));
+    assert_eq!(s.effective(1, 0, 6).into_iter().collect::<Vec<_>>(), [0, 2], "the current page and the toggled one");
+    assert_eq!(s.effective(2, 0, 6).into_iter().collect::<Vec<_>>(), [0], "another document: the current page");
+    assert_eq!(s.effective(1, 1, 6).into_iter().collect::<Vec<_>>(), [1], "after navigating");
+    assert_eq!(s.effective(1, 0, 4).into_iter().collect::<Vec<_>>(), [0], "after pages were deleted");
+    // A current page past the end selects nothing and an unknown page is ignored, without a panic.
+    assert!(PageSelection::default().effective(1, 7, 3).is_empty());
+    assert!(!PageSelection::default().click(1, 0, 3, 9, true, false));
+}
+
+#[test]
+fn a_plain_click_selects_and_goes_to_the_page() {
+    let mut h = pages_harness(6);
+    click_page(&mut h, 3, Modifiers::NONE);
+    assert_eq!(crate::canvas::current_page(h.state()), Some(2));
+    assert_eq!(selected_pages(h.state()), [2]);
+}
+
+#[test]
+fn ctrl_click_toggles_pages_without_navigating() {
+    let mut h = pages_harness(6);
+    click_page(&mut h, 2, Modifiers::NONE);
+    click_page(&mut h, 4, CTRL);
+    assert_eq!(selected_pages(h.state()), [1, 3]);
+    assert_eq!(crate::canvas::current_page(h.state()), Some(1), "the canvas stays");
+    click_page(&mut h, 5, CTRL);
+    assert_eq!(selected_pages(h.state()), [1, 3, 4]);
+    click_page(&mut h, 4, CTRL);
+    click_page(&mut h, 5, CTRL);
+    assert_eq!(selected_pages(h.state()), [1]);
+    click_page(&mut h, 2, CTRL);
+    assert_eq!(selected_pages(h.state()), [1], "toggling the last one off falls back to the current page");
+}
+
+#[test]
+fn shift_click_selects_the_range_from_the_anchor_either_way() {
+    let mut h = pages_harness(6);
+    click_page(&mut h, 2, Modifiers::NONE);
+    click_page(&mut h, 5, SHIFT);
+    assert_eq!(selected_pages(h.state()), [1, 2, 3, 4]);
+    click_page(&mut h, 1, SHIFT);
+    assert_eq!(selected_pages(h.state()), [0, 1], "the anchor stays on page 2");
+    click_page(&mut h, 6, Modifiers::NONE);
+    click_page(&mut h, 4, SHIFT);
+    assert_eq!(selected_pages(h.state()), [3, 4, 5]);
+}
+
+#[test]
+fn ctrl_shift_click_adds_a_range() {
+    let mut h = pages_harness(8);
+    click_page(&mut h, 1, Modifiers::NONE);
+    click_page(&mut h, 3, CTRL);
+    click_page(&mut h, 6, CTRL_SHIFT);
+    assert_eq!(selected_pages(h.state()), [0, 2, 3, 4, 5]);
+}
+
+#[test]
+fn the_footer_delete_removes_every_selected_page_and_the_selection_is_dropped() {
+    let mut h = pages_harness(6);
+    click_page(&mut h, 2, Modifiers::NONE);
+    click_page(&mut h, 4, SHIFT);
+    h.get_by_label("Delete selected pages").click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.doc().unwrap().doc.page_count(), 3);
+    let cur = crate::canvas::current_page(h.state()).unwrap_or(0);
+    assert_eq!(selected_pages(h.state()), [cur], "the old selection does not outlive the deleted pages");
+}
+
+fn parents_of(app: &DesignApp) -> Vec<Option<designcraft_doc::SpreadId>> {
+    let doc = app.session.doc().unwrap().doc.clone();
+    doc.spreads.iter().flat_map(|s| s.pages.iter().map(|p| p.parent)).collect()
+}
+
+fn pages_without_parent(app: &DesignApp) -> Vec<usize> {
+    parents_of(app).iter().enumerate().filter(|(_, p)| p.is_none()).map(|(i, _)| i).collect()
+}
+
+#[test]
+fn apply_parent_in_the_page_menu_acts_on_the_selection_when_the_page_is_in_it() {
+    for (clicked, expected) in [(2usize, vec![1usize, 2, 3]), (4, vec![4])] {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"pages": 6, "facingPages": false})).unwrap();
+        let st = app.session.active().unwrap();
+        let (uid, count) = (st.uid, st.doc.page_count());
+        assert!(parents_of(&app).iter().all(Option::is_some), "pages start with the default parent");
+        app.ui.pages_selection.set(uid, 0, count, [1, 2, 3].into());
+        let si = app.session.doc().unwrap().doc.page_loc(clicked).unwrap().0;
+        let mut h = menu_harness(app, clicked, si);
+        h.get_by_label("Apply Parent to Pages").click();
+        h.run_steps(3);
+        h.get_by_label("[None]").click();
+        h.run_steps(3);
+        assert_eq!(pages_without_parent(h.state()), expected, "right-clicked page {clicked}");
+    }
+}
+
+#[test]
+fn a_parent_dropped_on_a_selected_page_applies_to_the_selection() {
+    for (target, expected) in [(2usize, vec![1usize, 2, 3]), (4, vec![4])] {
+        let mut h = pages_harness(6);
+        click_page(&mut h, 2, Modifiers::NONE);
+        click_page(&mut h, 4, SHIFT);
+        let at = h.get_by_label(&format!("Page {}", target + 1)).rect().center();
+        let modifiers = Modifiers::NONE;
+        h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: true, modifiers });
+        egui::DragAndDrop::set_payload(&h.ctx, PageDrag::Parent(None));
+        h.event(Event::PointerMoved(at));
+        h.run_steps(2);
+        h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: false, modifiers });
+        h.run_steps(3);
+        assert_eq!(pages_without_parent(h.state()), expected, "dropped on page {}", target + 1);
+    }
+}
+
+#[test]
+fn dragging_on_the_empty_background_selects_the_pages_it_touches() {
+    let mut h = pages_harness(6);
+    let second = h.get_by_label("Page 2").rect();
+    let fourth = h.get_by_label("Page 4").rect();
+    // From the empty margin left of page 2 to the middle of page 4.
+    drag_between(&mut h, egui::pos2(second.min.x - 20.0, second.min.y + 2.0), fourth.center(), Modifiers::NONE);
+    assert_eq!(selected_pages(h.state()), [1, 2, 3]);
+    // With Ctrl/Cmd, a marquee over page 6 adds it.
+    let last = h.get_by_label("Page 6").rect();
+    drag_between(&mut h, egui::pos2(last.min.x - 20.0, last.min.y + 2.0), last.center(), CTRL);
+    assert_eq!(selected_pages(h.state()), [1, 2, 3, 5]);
+}

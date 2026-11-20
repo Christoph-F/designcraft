@@ -278,6 +278,114 @@ const DIVIDER_H: f32 = 9.0;
 const PARENTS_DEFAULT_ROWS: f32 = 4.5;
 /// Selected-page tint (multiplied over the thumbnail).
 const SELECTED_TINT: Color32 = Color32::from_rgb(0x88, 0xc7, 0xfb);
+/// The pages selected in the Pages panel (Ctrl/Cmd-click, Shift-click, marquee), as absolute
+/// 0-based indices. An empty set means the current page alone, as before multi-selection. The
+/// selection belongs to one document, one current page and one page count: a change of any of
+/// them (another document, navigation, pages inserted, deleted or moved) drops it, so it never
+/// points at a page it was not made on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PageSelection {
+    uid: u64,
+    current: usize,
+    count: usize,
+    pages: std::collections::BTreeSet<usize>,
+    anchor: Option<usize>,
+}
+
+/// Every page from `a` to `b`, inclusive, in either direction.
+pub(crate) fn page_range(a: usize, b: usize) -> std::collections::BTreeSet<usize> {
+    (a.min(b)..=a.max(b)).collect()
+}
+
+/// Drop the indices that are not pages of a document of `count` pages.
+pub(crate) fn prune_pages(pages: &mut std::collections::BTreeSet<usize>, count: usize) {
+    pages.retain(|&p| p < count);
+}
+
+impl PageSelection {
+    /// Bring the selection in line with the active document, its current page and page count.
+    pub(crate) fn sync(&mut self, uid: u64, current: usize, count: usize) {
+        if self.uid != uid {
+            *self = PageSelection { uid, current, count, ..Default::default() };
+            return;
+        }
+        if self.count != count {
+            self.anchor = None;
+            self.pages.clear();
+        }
+        if self.current != current {
+            self.pages.clear();
+        }
+        self.current = current;
+        self.count = count;
+        prune_pages(&mut self.pages, count);
+        self.anchor = self.anchor.filter(|&a| a < count);
+    }
+
+    /// The selected pages: the set, or the current page alone when there is none.
+    pub(crate) fn effective(&self, uid: u64, current: usize, count: usize) -> std::collections::BTreeSet<usize> {
+        let mut pages = if self.uid == uid && self.current == current && self.count == count { self.pages.clone() } else { Default::default() };
+        prune_pages(&mut pages, count);
+        if pages.is_empty() && current < count {
+            pages.insert(current);
+        }
+        pages
+    }
+
+    /// The pages a command started from page `abs` acts on: the selection when it holds `abs`,
+    /// else `abs` alone.
+    pub(crate) fn targets(&self, uid: u64, current: usize, count: usize, abs: usize) -> Vec<usize> {
+        let sel = self.effective(uid, current, count);
+        if sel.contains(&abs) { sel.into_iter().collect() } else { vec![abs] }
+    }
+
+    /// A click on page `page`. Returns whether it should also go to that page: a plain click
+    /// does; Ctrl/Cmd toggles the page and Shift selects from the anchor, without moving.
+    pub(crate) fn click(&mut self, uid: u64, current: usize, count: usize, page: usize, command: bool, shift: bool) -> bool {
+        self.sync(uid, current, count);
+        if page >= count {
+            return false;
+        }
+        if !command && !shift {
+            self.pages.clear();
+            self.anchor = Some(page);
+            return true;
+        }
+        let mut pages = self.effective(uid, current, count);
+        if shift {
+            let from = self.anchor.unwrap_or(current);
+            if !command {
+                pages.clear();
+            }
+            pages.extend(page_range(from, page));
+            // The anchor stays, so the range can be changed with another Shift-click.
+            self.anchor = Some(from);
+        } else {
+            if !pages.remove(&page) {
+                pages.insert(page);
+            }
+            self.anchor = Some(page);
+        }
+        self.pages = pages;
+        false
+    }
+
+    /// Select exactly `pages` (the marquee and `pages.select`).
+    pub(crate) fn set(&mut self, uid: u64, current: usize, count: usize, pages: std::collections::BTreeSet<usize>) {
+        self.sync(uid, current, count);
+        self.anchor = pages.iter().next().copied();
+        self.pages = pages;
+        prune_pages(&mut self.pages, count);
+    }
+}
+
+/// The active document's page selection, as the pages it covers.
+pub(crate) fn selected_pages(app: &DesignApp) -> Vec<usize> {
+    let Some(st) = app.session.active() else { return Vec::new() };
+    let cur = crate::canvas::current_page(app).unwrap_or(0);
+    app.ui.pages_selection.effective(st.uid, cur, st.doc.page_count()).into_iter().collect()
+}
+
 /// Page-number badge of the selected page.
 const BADGE: Color32 = Color32::from_rgb(0x2f, 0x73, 0xe0);
 /// Thumbnail height (InDesign: about 28×37 pt for Letter).
@@ -536,6 +644,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
     };
     // ---- Document spreads.
     let cur = crate::canvas::current_page(app).unwrap_or(0);
+    let page_count = doc.page_count();
+    app.ui.pages_selection.sync(uid, cur, page_count);
+    let picked = app.ui.pages_selection.effective(uid, cur, page_count);
+    let thumb_rects: std::cell::RefCell<Vec<(usize, egui::Rect)>> = Default::default();
+    let avoid: std::cell::RefCell<Vec<egui::Rect>> = Default::default();
     let cur_spread = doc.page_loc(cur).map(|l| l.0);
     let followed_id = egui::Id::unique("pages_panel_followed");
     let dragging = egui::DragAndDrop::has_any_payload(ui.ctx());
@@ -571,7 +684,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                     let x0 = row.min.x + center + (p.x as f32 - spine) * scale;
                     let pr = egui::Rect::from_min_size(egui::pos2(x0, top), vec2(p.width as f32 * scale, p.height as f32 * scale));
                     let resp = ui.interact(pr, ui.scope_id().with(("page", abs)), Sense::click_and_drag());
-                    let selected = abs == cur && !editing_parents;
+                    let selected = picked.contains(&abs) && !editing_parents;
+                    thumb_rects.borrow_mut().push((abs, pr));
                     // Screen readers hear "Page 3".
                     resp.widget_info(|| {
                         egui::WidgetInfo::selected(egui::Role::Button, true, selected, format!("Page {}", app.session.page_label(abs)))
@@ -593,8 +707,9 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                             t.icon,
                             Stroke::NONE,
                         ));
-                        let marker =
-                            ui.interact(egui::Rect::from_center_size(c, vec2(12.0, 8.0)), ui.scope_id().with(("section", abs)), Sense::click());
+                        let marker_rect = egui::Rect::from_center_size(c, vec2(12.0, 8.0));
+                        avoid.borrow_mut().push(marker_rect);
+                        let marker = ui.interact(marker_rect, ui.scope_id().with(("section", abs)), Sense::click());
                         let label = format!(
                             "{}: {}",
                             crate::i18n::tr(&app.ui.language, "Numbering & Section Options…").trim_end_matches('…'),
@@ -641,16 +756,25 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                     if let Some(payload) = resp.dnd_release_payload::<PageDrag>() {
                         drop = Some(((*payload).clone(), abs));
                     }
+                    if resp.secondary_clicked() && !picked.contains(&abs) {
+                        app.ui.pages_selection.set(uid, cur, page_count, std::iter::once(abs).collect());
+                    }
                     if resp.clicked() || resp.double_clicked() {
+                        let m = ui.input(|i| i.modifiers);
+                        let double = resp.double_clicked();
+                        let go = app.ui.pages_selection.click(uid, cur, page_count, abs, m.command && !double, m.shift && !double);
                         select_parent(app, None);
-                        if editing_parents {
-                            let _ = app.run("layout.parents.edit", json!({"on": false}));
-                            // The canvas refits to the page's spread once it is centred.
-                            if let Some(v) = app.view_mut() {
-                                v.fitted = false;
+                        // Ctrl/Cmd and Shift only select; the canvas stays where it is.
+                        if go || editing_parents {
+                            if editing_parents {
+                                let _ = app.run("layout.parents.edit", json!({"on": false}));
+                                // The canvas refits to the page's spread once it is centred.
+                                if let Some(v) = app.view_mut() {
+                                    v.fitted = false;
+                                }
                             }
+                            crate::canvas::go_to_page(app, abs);
                         }
-                        crate::canvas::go_to_page(app, abs);
                     }
                     resp.context_menu(|ui| page_menu(app, ui, &doc, &layouts, abs, si));
                 }
@@ -665,6 +789,7 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                     ui.painter().rect_filled(br, 0.0, BADGE);
                 }
                 ui.painter().galley(c - g.size() / 2.0, g, ink);
+                avoid.borrow_mut().push(br);
                 let lr = ui.interact(br, ui.scope_id().with(("spread_label", si)), Sense::click());
                 // A click goes to the spread, so assistive technology hears a button.
                 lr.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
@@ -681,6 +806,11 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         };
         let area = if columns { egui::ScrollArea::both() } else { egui::ScrollArea::vertical() };
         area.id_salt("pages_spreads").max_height(pages_h).min_scrolled_height(pages_h).auto_shrink([false, false]).show(ui, |ui| {
+            thumb_rects.borrow_mut().clear();
+            avoid.borrow_mut().clear();
+            // Dragging on the empty background (under the thumbnails, which take their own
+            // drags) draws a marquee that selects the pages it touches.
+            let background = (!editing_parents).then(|| ui.interact(ui.clip_rect(), ui.scope_id().with("pages_marquee"), Sense::drag()));
             ui.add_space(4.0);
             if columns {
                 // Alternate layouts side by side, as InDesign's: a column each, its name and size
@@ -718,6 +848,28 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             let rest = ui.available_rect_before_wrap();
             let (_, empty) = ui.allocate_exact_size(vec2(ui.available_width(), rest.height().max(8.0)), Sense::click());
             empty.context_menu(|ui| empty_menu(app, ui));
+            if let Some(bg) = background {
+                let base_id = ui.scope_id().with("pages_marquee_base");
+                let origin = ui.input(|i| i.pointer.press_origin());
+                let blocked = origin.is_some_and(|o| avoid.borrow().iter().any(|r| r.contains(o)));
+                if bg.drag_started() && !blocked {
+                    let add = ui.input(|i| i.modifiers.command);
+                    let base = if add { picked.clone() } else { Default::default() };
+                    ui.data_mut(|d| d.insert_temp(base_id, base));
+                }
+                if bg.dragged()
+                    && !blocked
+                    && let Some(o) = origin
+                    && let Some(now) = ui.input(|i| i.pointer.latest_pos())
+                    && let Some(mut pages) = ui.data(|d| d.get_temp::<std::collections::BTreeSet<usize>>(base_id))
+                {
+                    let band = egui::Rect::from_two_pos(o, now);
+                    let c = t.accent;
+                    ui.painter().rect(band, 0.0, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 40), Stroke::new(1.0, c), StrokeKind::Inside);
+                    pages.extend(thumb_rects.borrow().iter().filter(|(_, r)| r.intersects(band)).map(|(abs, _)| *abs));
+                    app.ui.pages_selection.set(uid, cur, page_count, pages);
+                }
+            }
         });
     };
     // The divider: drag it to show more or fewer parents.
@@ -756,7 +908,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icons::button(ui, "trash", 20.0, false, crate::i18n::tr(&app.ui.language, "Delete selected pages")).clicked() {
-                let _ = crate::dialogs::delete_pages(app, vec![cur]);
+                let pages = selected_pages(app);
+                let _ = crate::dialogs::delete_pages(app, pages);
             }
             // Create new page; a page dropped on it is duplicated at the end of the document.
             let plus = icons::button(ui, "plus", 20.0, dragging, crate::i18n::tr(&app.ui.language, "Create new page"));
@@ -808,7 +961,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
         }
         Some((PageDrag::Parent(parent), to)) => {
-            let _ = app.run("layout.pages.applyParent", json!({"pages": [to], "parent": parent.map(|id| id.0)}));
+            let pages: Vec<usize> = if picked.contains(&to) { picked.iter().copied().collect() } else { vec![to] };
+            let _ = app.run("layout.pages.applyParent", json!({"pages": pages, "parent": parent.map(|id| id.0)}));
         }
         _ => {}
     }
@@ -1146,15 +1300,20 @@ fn page_menu(
     ui.separator();
     let target = target_parent(app, doc);
     parent_menu(app, ui, doc, target, true);
+    // On every selected page when the clicked one is selected, else on it alone.
+    let targets = {
+        let cur = crate::canvas::current_page(app).unwrap_or(0);
+        app.session.active().map_or_else(|| vec![abs], |st| app.ui.pages_selection.targets(st.uid, cur, doc.page_count(), abs))
+    };
     crate::menus::menu_button(ui, crate::rtl::widget(ui, tr("Apply Parent to Pages")), |ui| {
         if ui.button(crate::rtl::widget(ui, tr("[None]"))).clicked() {
-            let _ = app.run("layout.pages.applyParent", json!({"pages": [abs], "parent": null}));
+            let _ = app.run("layout.pages.applyParent", json!({"pages": targets, "parent": null}));
             ui.close();
         }
         for pp in &doc.parents {
             let l = pp.parent.as_ref().map(|i| i.label()).unwrap_or_default();
             if ui.button(&l).clicked() {
-                let _ = app.run("layout.pages.applyParent", json!({"pages": [abs], "parent": pp.id.0}));
+                let _ = app.run("layout.pages.applyParent", json!({"pages": targets, "parent": pp.id.0}));
                 ui.close();
             }
         }
