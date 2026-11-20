@@ -146,3 +146,5 @@ covers checking the sampled and redefined settings in the styles tutorial (2:45 
 
 Double-clicking a section triangle in the Pages panel opens Numbering & Section Options for
 that section’s first page. It leaves parent-page editing and does not edit section data until confirmed.
+
+The Pages panel selects several pages: Ctrl/Cmd-click toggles, Shift-click selects a range, and dragging on the empty background draws a marquee. Delete and Apply Parent to Pages act on the selection (#2738).
