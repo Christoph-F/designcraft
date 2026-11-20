@@ -1,4 +1,5 @@
 use super::formats::{epub_split_param, export_epub, export_html, export_pptx, export_text, has_story_target, print_booklet};
+use super::impose::{export_imposed, impose_layout};
 use super::pdf::export_pdf;
 use super::{CommandSpec, Value, cmd, has_doc, json};
 
@@ -40,6 +41,12 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.printBooklet", "Print Booklet…", ["File"], None,
         "{path?, type?: saddleStitch|twoUpConsecutive, spaceBetween? (pt)} — printer spreads as PDF (pages imposed in booklet order) → {path, bytes, sheets} (no path: {base64, …})",
         has_doc, print_booklet),
+        cmd!(noundo "file.exportImposed", "Export Imposed PDF…", ["File"], None,
+        "{path?, sheet: [w, h] (pt), margins?: [top, right, bottom, left] (pt, default 10 mm), gap?: [x, y] (pt, default twice the largest bleed), rotate?: auto|off|on, center?: bool (default true), pages?: \"1-3,5\" | [1,3] (default all), copies?: n (default 1), marks?: none|sheet|each (default sheet), bleed?: bool (default true: the document bleed)} — the pages tiled N-up on press sheets → {path, bytes, sheets, warnings} (no path: {base64, …})",
+        has_doc, export_imposed),
+        cmd!(query "file.imposeLayout", "Imposition Layout", [], None,
+        "{same as file.exportImposed, no path} → {columns, rows, rotated, perSheet, sheets, placements, cells: [{trim: [x, y, w, h], clip, column, row}], marks: [[x0, y0, x1, y1]]}",
+        has_doc, impose_layout),
         cmd!(noundo "file.exportHtml", "Export HTML…", ["File"], None,
         "{path?, title?, language?} — one self-contained page (styles inline, images embedded), stories and graphics in reading order → {path, bytes, warnings} (no path: {text, bytes, warnings})",
         has_doc, export_html),

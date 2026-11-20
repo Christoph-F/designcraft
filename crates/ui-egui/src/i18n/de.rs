@@ -3,6 +3,18 @@
 //! Brazilian Portuguese, Italian and Ukrainian tables has a row here; the German column of the shared
 //! table is carried over and stays the fallback for keys added there after this table.
 pub(super) const TABLE: &[(&str, &str)] = &[
+    ("Export Imposed PDF…", "Ausgeschossenes PDF exportieren …"),
+    ("Export Imposed PDF", "Ausgeschossenes PDF exportieren"),
+    ("Sheet:", "Bogen:"),
+    ("Gap:", "Abstand:"),
+    ("mm (empty: twice the bleed)", "mm (leer: doppelte Beschnittzugabe)"),
+    ("Rotate:", "Drehen:"),
+    ("Marks:", "Schneidmarken:"),
+    ("Sheet", "Bogen"),
+    ("Each Page", "Jede Seite"),
+    ("Center on Sheet", "Auf dem Bogen zentrieren"),
+    ("Use Document Bleed", "Beschnittzugabe des Dokuments verwenden"),
+    ("{per} per sheet · {sheets} sheets ({pages} pages)", "{per} pro Bogen · {sheets} Bögen ({pages} Seiten)"),
     ("Fewer Options", "Weniger Optionen"),
     ("Tab Character", "Tabulatorzeichen"),
     ("File", "Datei"),
