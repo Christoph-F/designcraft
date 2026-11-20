@@ -38,6 +38,7 @@ impl Dialog {
             "newDocument" => crate::new_document::defaults(),
             "contactSheet" => json!({"columns": 3, "rows": 4, "gutter": "6pt", "margin": "36pt"}),
             "goToPage" => json!({"page": "1"}),
+            "imposeExport" => crate::impose_dialog::defaults(),
             "epubExport" => json!({"split": false, "mode": "style", "style": designcraft_doc::BASIC_PARAGRAPH, "coverImage": ""}),
             "qrCode" => json!({"type": "url", "content": "https://", "color": "[Black]"}),
             "insertTable" => json!({"bodyRows": 4, "columns": 4, "headerRows": 0, "footerRows": 0}),
@@ -825,6 +826,11 @@ pub fn open_epub_export(app: &mut DesignApp) {
         EpubSplit::ExportTags => json!({"split": true, "mode": "exportTags"}),
     };
     app.ui.dialog = Some(Dialog::new("epubExport", fields));
+}
+
+/// File > Export Imposed PDF…: the imposition dialog.
+pub fn open_impose_export(app: &mut DesignApp) {
+    app.ui.dialog = Some(Dialog::new("imposeExport", json!({})));
 }
 
 /// The Split Document setting the EPUB Export Options dialog's fields describe.
@@ -3342,6 +3348,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "pdfImport" => crate::i18n::tr(&app.ui.language, "Place PDF"),
         "pdfExport" => crate::i18n::tr(&app.ui.language, "Export PDF"),
         "epubExport" => crate::i18n::tr(&app.ui.language, "EPUB Export Options"),
+        "imposeExport" => crate::i18n::tr(&app.ui.language, "Export Imposed PDF"),
         "colorSettings" => crate::i18n::tr(&app.ui.language, "Color Settings"),
         "layerOptions" => crate::i18n::tr(&app.ui.language, "Object Layer Options"),
         "colorPicker" => crate::i18n::tr(&app.ui.language, "Color Picker"),
@@ -4220,6 +4227,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                     "numberingSection" => crate::section_options::body(app, ui, &mut d),
                     "pdfExport" => pdf_export(app, ui, &mut d),
                     "epubExport" => epub_export(app, ui, &mut d),
+                    "imposeExport" => crate::impose_dialog::body(app, ui, &mut d),
                     "alert" => {
                         let file = d.s("file");
                         if !file.is_empty() {
@@ -5218,6 +5226,11 @@ fn confirm_part3(app: &mut DesignApp, d: Dialog) -> Result<Value, String> {
             let cover = cover.trim();
             let params = if cover.is_empty() { json!({}) } else { json!({"coverImage": cover}) };
             crate::menus::export_epub(app, &params)
+        }
+        "imposeExport" => {
+            let params = crate::impose_dialog::params(&d)?;
+            let name = format!("{}-imposed.pdf", app.session.active().map(|st| st.doc.title.clone()).unwrap_or_default());
+            app.ask_save(&name, Bound::Document, move |app, path| app.run("app.exportImposed", with_path(&params, "path", path)))
         }
         "pdfExport" => {
             // Remember the last-used options; `pages` and `title` are per-job and not persisted.

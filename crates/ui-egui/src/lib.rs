@@ -27,6 +27,7 @@ pub mod effects_dialog;
 pub mod export_batch_dialog;
 pub mod i18n;
 pub mod icons;
+mod impose_dialog;
 pub mod keys;
 #[cfg(not(target_arch = "wasm32"))]
 mod links_worker;

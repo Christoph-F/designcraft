@@ -72,6 +72,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.exportHtml", "Export HTML…", None, "{path?} — one self-contained web page"),
     ("app.exportPptx", "Export PowerPoint…", None, "{path?} — every page as a slide of editable shapes, pictures and text"),
     ("app.exportXml", "Export XML…", None, "{path?} — the tagged content"),
+    (
+        "app.exportImposed",
+        "Export Imposed PDF…",
+        None,
+        "{path?, sheet?, margins?, gap?, rotate?, pages?, copies?, marks?, bleed?} — N-up press sheets as PDF; without a path, the Export Imposed PDF dialog (see file.exportImposed)",
+    ),
     ("app.printBooklet", "Print Booklet…", None, "{path?} — saddle-stitched printer spreads as PDF"),
     ("app.qrCode", "Generate QR Code…", None, "{} — the QR Code dialog (object.qrCode does the work)"),
     ("app.userDictionary", "User Dictionary…", None, "{} — hyphenation exceptions (hyphenation.* commands)"),

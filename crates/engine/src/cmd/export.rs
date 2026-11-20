@@ -9,6 +9,7 @@ use crate::{EngineError, Result, Session};
 
 mod flatten;
 mod formats;
+mod impose;
 mod pdf;
 mod registry;
 

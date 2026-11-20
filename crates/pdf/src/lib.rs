@@ -38,6 +38,7 @@
 
 mod export;
 mod gradient_inks;
+pub mod impose;
 pub mod inks;
 mod links;
 mod marks;
@@ -51,8 +52,8 @@ mod pdfx1a;
 mod svg_options;
 mod transitions;
 pub use export::{
-    BookletKind, BookletOptions, booklet_pairs, drawn_children, export_booklet, export_pdf, export_pdf_with_report, item_exported, layer_exported,
-    merge_pdfs, print_color, sheet_spreads, shown_parent_items,
+    BookletKind, BookletOptions, ImposedOptions, MAX_PLACEMENTS, MarkStyle, booklet_pairs, drawn_children, export_booklet, export_imposed,
+    export_pdf, export_pdf_with_report, item_exported, layer_exported, mark_segments, merge_pdfs, print_color, sheet_spreads, shown_parent_items,
 };
 pub use pdfx::{check_pdfx4, has_rgb_groups, make_pdfx4, pdfx_version};
 pub use pdfx1a::check_pdfx1a;

@@ -31,6 +31,7 @@ mod booklet;
 mod common;
 mod graphics;
 mod images;
+mod impose;
 mod metadata;
 mod paint;
 mod pipeline;
@@ -44,6 +45,7 @@ use graphics::CoverageImage;
 use images::ConstantImageHasher;
 pub(crate) use images::SRGB_ICC;
 use images::{CmykImage, GreyImage, ImageContentCache, RasterMode, SrgbImage, embedded_icc, is_grey, is_grey_icc};
+pub use impose::{ImposedOptions, MAX_PLACEMENTS, MarkStyle, export_imposed, mark_segments};
 pub(crate) use metadata::civil;
 pub(crate) use pipeline::{MARK_LEN, Sheet, exported_items, mark_start};
 pub use pipeline::{
