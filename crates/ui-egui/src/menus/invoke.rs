@@ -101,6 +101,11 @@ fn activate_inner(app: &mut DesignApp, id: &str, params: &Value) {
             return;
         }
     }
+    // Apply Parent to Pages…: its own dialog (parent and a page range).
+    if params.is_null() && id == "layout.pages.applyParent" {
+        crate::dialogs::open_apply_parent(app);
+        return;
+    }
     if params.is_null()
         && ui_label(id).is_none()
         && let Some(c) = designcraft_engine::find_command(id)

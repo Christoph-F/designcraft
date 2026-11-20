@@ -248,6 +248,38 @@ pub fn parse_page_range(s: &str, count: usize) -> Result<Vec<usize>> {
     Ok(out)
 }
 
+/// [`parse_page_range`] for input that must not be guessed at: an empty string, or an empty part
+/// between commas (`"1,,2"`, `","`, a trailing comma), is an error rather than skipped. `"all"` is
+/// still every page.
+pub fn parse_page_range_strict(s: &str, count: usize) -> Result<Vec<usize>> {
+    if s.split(',').any(|part| part.trim().is_empty()) {
+        return Err(PdfError::BadRange(s.to_string()));
+    }
+    parse_page_range(s, count)
+}
+
+/// The 1-based range text for a set of 0-based page indices: `[0, 1, 2, 6]` gives `"1-3, 7"`, and
+/// `[]` gives `""`. Order and repeats do not matter. The output reads back with [`parse_page_range`].
+pub fn format_page_range(pages: &[usize]) -> String {
+    let mut sorted = pages.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for p in sorted {
+        match runs.last_mut() {
+            Some((_, end)) if end.checked_add(1) == Some(p) => *end = p,
+            _ => runs.push((p, p)),
+        }
+    }
+    runs.iter()
+        .map(|&(start, end)| {
+            let (a, b) = (start.saturating_add(1), end.saturating_add(1));
+            if a == b { a.to_string() } else { format!("{a}-{b}") }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl From<craft_pdf::write::WriteError> for PdfError {
     fn from(error: craft_pdf::write::WriteError) -> Self {
         Self::Write(error.to_string())

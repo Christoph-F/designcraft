@@ -177,11 +177,11 @@ pub fn specs() -> Vec<CommandSpec> {
             "Apply Parent to Pages…",
             ["Layout", "Pages"],
             None,
-            "{pages: [0-based page indices], parent: id|\"A-Parent\"|\"A\"|null (null or \"[None]\" clears)} → {applied: how many pages took the parent}",
+            "{pages: [0-based page indices] or a 1-based range string (\"1-5, 8\", \"8-\", \"all\"), parent: id|\"A-Parent\"|\"A\"|null (null or \"[None]\" clears)} → {applied: how many pages took the parent}",
             has_doc,
             |s, p| {
                 const ID: &str = "layout.pages.applyParent";
-                let pages = page_indices(ID, s.doc()?.doc.page_count(), p)?;
+                let pages = parent_target_pages(ID, s.doc()?.doc.page_count(), p)?;
                 let applied = distinct_pages(&pages);
                 let parent = parent_ref(ID, &s.doc()?.doc, p.get("parent"))?.unwrap_or(None);
                 s.edit(|d, _| {
@@ -871,6 +871,21 @@ fn page_indices(id: &str, count: usize, p: &Value) -> Result<Vec<usize>> {
     Ok(out)
 }
 
+/// The pages `layout.pages.applyParent` acts on: a JSON list of 0-based indices, or a string that
+/// is a 1-based page range (`"1-5, 8"`, `"8-"`, `"all"`). Anything else, or a range that names no
+/// page or a page outside the document, is an error.
+fn parent_target_pages(id: &str, count: usize, p: &Value) -> Result<Vec<usize>> {
+    let Some(Value::String(text)) = p.get("pages") else {
+        return page_indices(id, count, p);
+    };
+    let pages = designcraft_pdf::parse_page_range_strict(text, count)
+        .map_err(|e| bad(id, format!("pages `{text}`: {e} (the document has {count} pages, ranges are 1-based)")))?;
+    if pages.is_empty() {
+        return Err(bad(id, format!("pages `{text}` names no page")));
+    }
+    Ok(pages)
+}
+
 /// How many pages a list of indices names, counting a repeated index once.
 fn distinct_pages(pages: &[usize]) -> usize {
     let mut v = pages.to_vec();
@@ -963,6 +978,76 @@ mod page_index_tests {
             assert!(err.contains("pages takes"), "refused: {list} → {err}");
         }
         assert_eq!(pages_left(&s), 4, "and nothing went");
+    }
+
+    /// Pages on the given parent, by 0-based index.
+    fn pages_on(s: &crate::Session, parent: u64) -> Vec<usize> {
+        let doc = &s.doc().unwrap().doc;
+        (0..doc.page_count()).filter(|&i| doc.page(i).unwrap().parent.map(|p| p.0) == Some(parent)).collect()
+    }
+
+    /// A parent `B` on a four-page document, and the id it was given.
+    fn four_pages_with_b() -> (crate::Session, u64) {
+        let mut s = four_pages();
+        let b = s.execute("layout.parents.new", &json!({"prefix": "B"})).unwrap()["id"].as_u64().unwrap();
+        (s, b)
+    }
+
+    /// The string form is a 1-based range: "1-2" is the first two pages.
+    #[test]
+    fn apply_parent_takes_a_one_based_range_string() {
+        let (mut s, b) = four_pages_with_b();
+        let r = s.execute("layout.pages.applyParent", &json!({"pages": "1-2", "parent": "B"})).unwrap();
+        assert_eq!(r["applied"], 2);
+        assert_eq!(pages_on(&s, b), vec![0, 1]);
+    }
+
+    /// An open range runs to the last page.
+    #[test]
+    fn apply_parent_open_range_runs_to_the_last_page() {
+        let (mut s, b) = four_pages_with_b();
+        s.execute("layout.pages.applyParent", &json!({"pages": "3-", "parent": "B"})).unwrap();
+        assert_eq!(pages_on(&s, b), vec![2, 3]);
+    }
+
+    /// "all" is every page, and a list of pages and ranges is deduplicated.
+    #[test]
+    fn apply_parent_all_and_overlapping_ranges() {
+        let (mut s, b) = four_pages_with_b();
+        s.execute("layout.pages.applyParent", &json!({"pages": "all", "parent": "B"})).unwrap();
+        assert_eq!(pages_on(&s, b), vec![0, 1, 2, 3]);
+        let (mut s, b) = four_pages_with_b();
+        let r = s.execute("layout.pages.applyParent", &json!({"pages": "1, 1-2", "parent": "B"})).unwrap();
+        assert_eq!(r["applied"], 2, "a page named twice counts once");
+        assert_eq!(pages_on(&s, b), vec![0, 1]);
+    }
+
+    /// Ranges that name no page, or a page the document does not have, are refused and change nothing.
+    #[test]
+    fn apply_parent_refuses_bad_range_strings_and_changes_nothing() {
+        for bad in ["5", "1-5", "abc", "", "  ", "0", "1,,2", "3-1"] {
+            let (mut s, b) = four_pages_with_b();
+            let err = s.execute("layout.pages.applyParent", &json!({"pages": bad, "parent": "B"}));
+            assert!(err.is_err(), "{bad:?} is refused");
+            assert!(pages_on(&s, b).is_empty(), "{bad:?} changed no page");
+        }
+    }
+
+    /// The error for a range past the end says the range is 1-based and how long the document is.
+    #[test]
+    fn apply_parent_range_error_names_the_base_and_the_length() {
+        let (mut s, _) = four_pages_with_b();
+        let err = s.execute("layout.pages.applyParent", &json!({"pages": "5", "parent": "B"})).unwrap_err().to_string();
+        assert!(err.contains("1-based"), "{err}");
+        assert!(err.contains("4 pages"), "{err}");
+    }
+
+    /// The array form still takes 0-based indices.
+    #[test]
+    fn apply_parent_array_form_stays_zero_based() {
+        let (mut s, b) = four_pages_with_b();
+        s.execute("layout.pages.applyParent", &json!({"pages": [0, 1], "parent": "B"})).unwrap();
+        assert_eq!(pages_on(&s, b), vec![0, 1]);
     }
 
     /// Both commands' `params` doc states that the indices count from 0.

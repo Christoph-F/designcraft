@@ -1159,6 +1159,10 @@ fn page_menu(
             }
         }
     });
+    if item(ui, "Apply Parent to Pages…") {
+        crate::dialogs::open_apply_parent_at(app, abs);
+        ui.close();
+    }
     if item(ui, "Override All Parent Page Items") {
         let _ = app.run("layout.overrideParentItems", json!({"page": abs}));
         ui.close();
