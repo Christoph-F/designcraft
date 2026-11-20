@@ -161,6 +161,22 @@ pub(crate) fn open_insert_pages(app: &mut DesignApp, abs: usize) {
     app.ui.dialog = Some(Dialog::new("insertPages", json!({"count": 1, "insert": "after", "page": abs, "parent": parent})));
 }
 
+/// Apply Parent to Pages…: the parent and the pages (a 1-based range), on the page in view.
+pub(crate) fn open_apply_parent(app: &mut DesignApp) {
+    let page = crate::canvas::current_page(app).unwrap_or(0);
+    open_apply_parent_at(app, page);
+}
+
+/// Apply Parent to Pages… with `abs` (0-based) as the pages' default.
+pub(crate) fn open_apply_parent_at(app: &mut DesignApp, abs: usize) {
+    let Some(st) = app.session.active() else { return };
+    let abs = abs.min(st.doc.page_count().saturating_sub(1));
+    let parents: Vec<Value> = st.doc.parents.iter().filter_map(|p| p.parent.as_ref().map(|i| json!([p.id.0.to_string(), i.label()]))).collect();
+    let first = st.doc.parents.first().map_or_else(String::new, |p| p.id.0.to_string());
+    let pages = abs.saturating_add(1).to_string();
+    app.ui.dialog = Some(Dialog::new("applyParent", json!({"parent": first, "parents": parents, "pages": pages})));
+}
+
 /// Insert Pages, as InDesign's: how many, where (after or before a page, at the start or the end
 /// of the document) and with which parent.
 fn insert_pages_dialog(app: &DesignApp, ui: &mut egui::Ui, d: &mut Dialog) {
@@ -3313,6 +3329,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "deletePages" => crate::i18n::tr(&app.ui.language, "Warning"),
         "pagesPanelOptions" => crate::i18n::tr(&app.ui.language, "Panel Options"),
         "parentOptions" => crate::i18n::tr(&app.ui.language, "Parent Options"),
+        "applyParent" => crate::i18n::tr(&app.ui.language, "Apply Parent to Pages"),
         "updateLink" => crate::i18n::tr(&app.ui.language, "Update Link"),
         "menus" => crate::i18n::tr(&app.ui.language, "Menu Customization"),
         "importOptions" => crate::i18n::tr(&app.ui.language, "Import Options"),
@@ -3349,8 +3366,8 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         let available = (ctx.content_rect().size() - frame_margin - egui::vec2(16.0, 16.0)).max(egui::Vec2::splat(1.0));
         let preferred_width: f32 = match d.id.as_str() {
             "alert" => 440.0,
-            "closeDocument" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "parentOptions" | "insertTable"
-            | "convertTableToText" => 380.0,
+            "closeDocument" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "parentOptions" | "applyParent"
+            | "insertTable" | "convertTableToText" => 380.0,
             "insertPages" => 440.0,
             "convertTextToTable" => 420.0,
             "newDocument" => 960.0,
@@ -3984,6 +4001,29 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                             crate::rtl::label(ui, crate::i18n::tr(&lang, "Resize:"));
                             combo(ui, &mut d, "resize", &resizes);
                         });
+                    }
+                    "applyParent" => {
+                        let lang = app.ui.language.clone();
+                        egui::Grid::new("apply_parent").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                            crate::rtl::label(ui, crate::i18n::tr(&lang, "Parent:"));
+                            let parents: Vec<(String, String)> = d
+                                .fields
+                                .get("parents")
+                                .and_then(Value::as_array)
+                                .map(|a| a.iter().filter_map(|b| Some((b.get(0)?.as_str()?.to_string(), b.get(1)?.as_str()?.to_string()))).collect())
+                                .unwrap_or_default();
+                            let none = crate::i18n::tr(&lang, "[None]").to_string();
+                            let mut opts: Vec<(&str, &str)> = vec![("", none.as_str())];
+                            opts.extend(parents.iter().map(|(v, l)| (v.as_str(), l.as_str())));
+                            combo(ui, &mut d, "parent", &opts);
+                            ui.end_row();
+                            crate::rtl::label(ui, crate::i18n::tr(&lang, "To Pages:"));
+                            text_field(ui, &mut d, "pages", 200.0);
+                            ui.end_row();
+                        });
+                        if let Some(st) = d.fields.get("status").and_then(Value::as_str) {
+                            crate::rtl::label(ui, st);
+                        }
                     }
                     "parentOptions" => {
                         // As InDesign's: Prefix, Name, Based on Parent (Number of Pages is the
@@ -5382,6 +5422,17 @@ fn confirm_part5(app: &mut DesignApp, d: Dialog) -> Result<Value, String> {
                 app.ui.skip_delete_pages_warning = true;
             }
             app.run("layout.pages.delete", json!({"pages": d.fields.get("pages").cloned().unwrap_or_else(|| json!([]))}))
+        }
+        "applyParent" => {
+            let parent = d.s("parent").parse::<u64>().map_or(Value::Null, |id| json!(id));
+            let r = app.run("layout.pages.applyParent", json!({"pages": d.s("pages"), "parent": parent}));
+            if let Err(e) = &r {
+                // A refused range: the dialog stays, with what was typed, saying why.
+                let mut d = d;
+                d.fields.insert("status".into(), json!(e));
+                app.ui.dialog = Some(d);
+            }
+            r
         }
         "parentOptions" => {
             let base = d.s("basedOn");

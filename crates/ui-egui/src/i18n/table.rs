@@ -1265,6 +1265,7 @@ pub(super) const TABLE: &[(&str, [&str; 5])] = &[
         ],
     ),
     ("Delete Spread", ["Druckbogen löschen", "Supprimer la planche", "Eliminar pliego", "スプレッドを削除", "删除跨页"]),
+    ("To Pages:", ["Für Seiten:", "Aux pages :", "A páginas:", "適用先ページ:", "应用于页面："]),
     ("Parent Pages", ["Übergeordnete Seiten", "Gabarits", "Páginas principales", "親ページ", "父页面"]),
     (
         "Apply Parent to Pages",
@@ -2032,7 +2033,13 @@ pub(super) const TABLE: &[(&str, [&str; 5])] = &[
     ("Apply Condition", ["Apply Condition", "Appliquer la condition", "Apply Condition", "Apply Condition", "应用条件"]),
     (
         "Apply Parent to Pages…",
-        ["Apply Parent to Pages…", "Appliquer le gabarit aux pages…", "Apply Parent to Pages…", "Apply Parent to Pages…", "将主页应用于页面…"],
+        [
+            "Übergeordnete Seite auf Seiten anwenden…",
+            "Appliquer le gabarit aux pages…",
+            "Apply Parent to Pages…",
+            "Apply Parent to Pages…",
+            "将主页应用于页面…",
+        ],
     ),
     (
         "ArtCraft App Page…",

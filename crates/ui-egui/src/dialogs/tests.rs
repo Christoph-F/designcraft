@@ -5653,3 +5653,24 @@ fn parent_resize_exact_dialog_keeps_its_target_and_rejects_invalid_input() {
     assert!(app.ui.dialog.is_some());
     assert!(std::sync::Arc::ptr_eq(&saved, &app.session.doc().unwrap().doc));
 }
+
+#[test]
+fn apply_parent_dialog_applies_a_parent_to_a_page_range_and_reports_a_bad_one() {
+    let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+    app.run("file.new", json!({"width": 100, "height": 100, "pages": 3})).unwrap();
+    app.run("layout.parents.new", json!({"prefix": "B"})).unwrap();
+    open_apply_parent_at(&mut app, 0);
+    let d = app.ui.dialog.as_mut().unwrap();
+    assert_eq!(d.s("pages"), "1");
+    let parent = d.fields["parents"].as_array().unwrap().iter().find(|p| p[1].as_str().unwrap_or("").starts_with("B")).unwrap()[0].clone();
+    d.fields.insert("parent".into(), parent);
+    d.fields.insert("pages".into(), json!("9"));
+    assert!(confirm(&mut app).is_err());
+    let d = app.ui.dialog.as_ref().expect("the dialog stays open on an error");
+    assert!(!d.s("status").is_empty());
+    app.ui.dialog.as_mut().unwrap().fields.insert("pages".into(), json!("1-2"));
+    confirm(&mut app).unwrap();
+    let doc = app.session.doc().unwrap().doc.clone();
+    let (a, b, c) = (doc.page(0).unwrap().parent, doc.page(1).unwrap().parent, doc.page(2).unwrap().parent);
+    assert!(a.is_some() && a == b && a != c, "pages 1-2 took B, page 3 kept its own");
+}

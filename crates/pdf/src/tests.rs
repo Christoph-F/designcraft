@@ -192,6 +192,40 @@ fn spreads_and_ranges() {
 }
 
 #[test]
+fn strict_page_range_refuses_what_the_lenient_parser_skips() {
+    assert_eq!(parse_page_range_strict("1-2, 4", 4).unwrap(), vec![0, 1, 3]);
+    assert_eq!(parse_page_range_strict("all", 3).unwrap(), vec![0, 1, 2]);
+    for bad in ["", "  ", ",", "1,,2", "1,", ",1", "x", "0", "5", "3-1"] {
+        assert!(parse_page_range_strict(bad, 4).is_err(), "{bad:?} is refused");
+    }
+    // The lenient parser keeps its behaviour: it still skips the empty parts.
+    assert_eq!(parse_page_range("1,,2", 4).unwrap(), vec![0, 1]);
+}
+
+#[test]
+fn format_page_range_writes_compact_one_based_runs() {
+    assert_eq!(format_page_range(&[0, 1, 2, 6]), "1-3, 7");
+    assert_eq!(format_page_range(&[4]), "5");
+    assert_eq!(format_page_range(&[]), "");
+    assert_eq!(format_page_range(&[6, 0, 2, 1, 1]), "1-3, 7");
+    assert_eq!(format_page_range(&[0, 1]), "1-2");
+    assert_eq!(format_page_range(&[0, 2, 3, 4, 9]), "1, 3-5, 10");
+}
+
+#[test]
+fn format_page_range_round_trips_through_parse_page_range() {
+    for pages in [vec![0, 1, 2, 6], vec![4], vec![0, 2, 3, 4, 9], vec![3, 0, 1, 1]] {
+        let text = format_page_range(&pages);
+        let mut expected = pages.clone();
+        expected.sort_unstable();
+        expected.dedup();
+        let mut back = parse_page_range_strict(&text, 10).unwrap();
+        back.sort_unstable();
+        assert_eq!(back, expected, "{text}");
+    }
+}
+
+#[test]
 fn pdfx4_xmp_has_metadata_date_and_version_id() {
     let d = doc_with_text("Print me");
     let opts = PdfOptions { standard: Standard::PdfX4, created: Some(1_700_000_000), ..Default::default() };
